@@ -1,0 +1,2 @@
+# Keep this provider aligned with the datasource in schema.prisma.
+provider = "postgresql"
