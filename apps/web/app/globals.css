@@ -1,0 +1,16 @@
+/* Written by the factory. The web foundation task replaces these with the UxDesign tokens. */
+:root {
+  --color-background: #ffffff;
+  --color-foreground: #111827;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: system-ui, sans-serif;
+}
