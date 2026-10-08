@@ -1,0 +1,141 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ParkingReleaseStatus {
+  OPEN
+  CLAIMED
+  CANCELLED
+}
+
+enum ParkingRole {
+  EMPLOYEE
+  SECURITY_GUARD
+  PARKING_ADMINISTRATOR
+}
+
+model Employee {
+  id             String             @id @default(cuid())
+  corporateEmail String             @unique
+  googleSubject  String             @unique
+  displayName    String
+  department     String?
+  employeeNumber String?            @unique
+  isActive       Boolean            @default(true)
+  createdAt      DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime           @updatedAt @db.Timestamptz(3)
+  assignments    ParkingAssignment[]
+  allocations    ParkingAllocation[]
+  vehicles       Vehicle[]
+  roles          EmployeeRole[]     @relation("EmployeeRoles")
+  grantedRoles   EmployeeRole[]     @relation("RoleGrantedBy")
+}
+
+model ParkingFloor {
+  id          String         @id @default(cuid())
+  floorNumber Int            @unique
+  name        String?
+  createdAt   DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime       @updatedAt @db.Timestamptz(3)
+  spaces      ParkingSpace[]
+}
+
+model ParkingSpace {
+  id            String              @id @default(cuid())
+  parkingFloorId String
+  spaceCode     String              @unique
+  createdAt     DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime            @updatedAt @db.Timestamptz(3)
+  parkingFloor  ParkingFloor        @relation(fields: [parkingFloorId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  assignments   ParkingAssignment[]
+
+  @@index([parkingFloorId])
+}
+
+model ParkingAssignment {
+  id             String          @id @default(cuid())
+  employeeId     String
+  parkingSpaceId String
+  effectiveFrom  DateTime        @db.Date
+  effectiveTo    DateTime?       @db.Date
+  createdAt      DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime        @updatedAt @db.Timestamptz(3)
+  employee       Employee        @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  parkingSpace   ParkingSpace    @relation(fields: [parkingSpaceId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  releases       ParkingRelease[]
+
+  @@index([employeeId])
+  @@index([parkingSpaceId])
+}
+
+model ParkingRelease {
+  id                  String               @id @default(cuid())
+  parkingAssignmentId String
+  releaseDate         DateTime             @db.Date
+  claimableAt          DateTime             @db.Timestamptz(3)
+  status               ParkingReleaseStatus @default(OPEN)
+  cancelledAt          DateTime?            @db.Timestamptz(3)
+  createdAt            DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime             @updatedAt @db.Timestamptz(3)
+  parkingAssignment    ParkingAssignment    @relation(fields: [parkingAssignmentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  allocation           ParkingAllocation?
+
+  @@index([parkingAssignmentId])
+  @@index([releaseDate, status, claimableAt])
+}
+
+model ParkingAllocation {
+  id              String         @id @default(cuid())
+  parkingReleaseId String         @unique
+  employeeId      String
+  allocatedAt     DateTime       @db.Timestamptz(3)
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime       @updatedAt @db.Timestamptz(3)
+  parkingRelease  ParkingRelease @relation(fields: [parkingReleaseId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  employee        Employee       @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([employeeId])
+}
+
+model Vehicle {
+  id                 String   @id @default(cuid())
+  employeeId         String
+  vehicleIdentifier  String   @unique
+  make               String?
+  model              String?
+  hasPermanentSticker Boolean
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime @updatedAt @db.Timestamptz(3)
+  employee           Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([employeeId])
+}
+
+model EmployeeRole {
+  id                   String     @id @default(cuid())
+  employeeId           String
+  role                 ParkingRole
+  assignedByEmployeeId String?
+  createdAt            DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime   @updatedAt @db.Timestamptz(3)
+  employee             Employee   @relation("EmployeeRoles", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  assignedBy           Employee?  @relation("RoleGrantedBy", fields: [assignedByEmployeeId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@unique([employeeId, role])
+  @@index([assignedByEmployeeId])
+}
+
+model ParkingConfiguration {
+  id                     String   @id @default(cuid())
+  /// Office-local time of day in HH:mm format; defaults to 08:00.
+  dailyParkingReleaseTime String   @default("08:00") @db.VarChar(5)
+  /// IANA time-zone identifier used to interpret office-local calendar dates.
+  officeTimeZone          String   @db.VarChar(255)
+  createdAt               DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime @updatedAt @db.Timestamptz(3)
+}

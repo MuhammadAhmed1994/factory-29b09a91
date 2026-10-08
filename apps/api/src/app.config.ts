@@ -6,6 +6,7 @@ import { INestApplication, Logger, UnprocessableEntityException, ValidationPipe 
 // development and test fall back to values that are safe because they are never shared.
 const logger = new Logger('Config');
 const generated = new Map<string, string>();
+const FOLIO3_EMAIL_DOMAIN = 'folio3.com';
 
 function isProduction(): boolean {
   return process.env.NODE_ENV === 'production';
@@ -13,6 +14,34 @@ function isProduction(): boolean {
 
 function fromEnv(name: string): string | undefined {
   return process.env[name]?.trim() || undefined;
+}
+
+function requiredInProduction(name: string, value: string | undefined): string | undefined {
+  if (!value && isProduction()) throw new Error(`${name} must be set in production`);
+  return value;
+}
+
+function googleOAuthClientValue(name: 'GOOGLE_CLIENT_ID' | 'GOOGLE_CLIENT_SECRET'): string | undefined {
+  return requiredInProduction(name, fromEnv(name));
+}
+
+function validateOfficeTimeZone(value: string | undefined): string {
+  const timeZone = requiredInProduction('OFFICE_TIME_ZONE', value) ?? 'UTC';
+  try {
+    // Intl uses the runtime's IANA time-zone database and throws for malformed/unknown identifiers.
+    new Intl.DateTimeFormat('en-US', { timeZone });
+  } catch {
+    throw new Error('OFFICE_TIME_ZONE must be a valid IANA time-zone identifier');
+  }
+  return timeZone;
+}
+
+function validateDailyParkingReleaseTime(value: string | undefined): string {
+  const time = value ?? '08:00';
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+    throw new Error('DAILY_PARKING_RELEASE_TIME must be a valid office-local time in HH:mm format');
+  }
+  return time;
 }
 
 // A signing key, read when it is used (a test that sets the variable is honoured). Unset outside
@@ -50,6 +79,23 @@ export const config = {
   get jwtSecret(): string {
     return secret('JWT_SECRET');
   },
+  get googleClientId(): string | undefined {
+    return googleOAuthClientValue('GOOGLE_CLIENT_ID');
+  },
+  get googleClientSecret(): string | undefined {
+    return googleOAuthClientValue('GOOGLE_CLIENT_SECRET');
+  },
+  // This is a fixed identity policy rather than an operator-overridable domain: accepting a
+  // different domain would also allow personal or unrelated-provider accounts to sign in.
+  get googleAllowedEmailDomain(): string {
+    return FOLIO3_EMAIL_DOMAIN;
+  },
+  get officeTimeZone(): string {
+    return validateOfficeTimeZone(fromEnv('OFFICE_TIME_ZONE'));
+  },
+  get dailyParkingReleaseTime(): string {
+    return validateDailyParkingReleaseTime(fromEnv('DAILY_PARKING_RELEASE_TIME'));
+  },
 };
 
 // Shared by main.ts and the test setup, so tests exercise the same pipes and CORS as the app.
@@ -57,6 +103,14 @@ export const config = {
 // its first request.
 export function configureApp(app: INestApplication): void {
   void config.jwtSecret;
+  const googleClientId = config.googleClientId;
+  const googleClientSecret = config.googleClientSecret;
+  if (Boolean(googleClientId) !== Boolean(googleClientSecret)) {
+    throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured together');
+  }
+  void config.googleAllowedEmailDomain;
+  void config.officeTimeZone;
+  void config.dailyParkingReleaseTime;
   app.enableCors({ origin: corsOrigins(), credentials: true });
   // whitelist/forbidNonWhitelisted reject unknown fields; use the status the Spec requires (often 422).
   app.useGlobalPipes(

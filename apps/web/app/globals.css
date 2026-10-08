@@ -1,16 +1,102 @@
-/* Written by the factory. The web foundation task replaces these with the UxDesign tokens. */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap');
+
 :root {
-  --color-background: #ffffff;
-  --color-foreground: #111827;
+  color-scheme: light;
+  --color-primary: #173b57;
+  --color-secondary: #e8eff4;
+  --color-accent: #087e8b;
+  --color-background: #f6f8fa;
+  --color-foreground: #17212b;
+  --color-card: #ffffff;
+  --color-card-foreground: #17212b;
+  --color-muted: #eef2f5;
+  --color-muted-foreground: #526273;
+  --color-border: #d5dee6;
+  --color-destructive: #b42318;
+  --color-ring: #087e8b;
+  --color-success: #18794e;
+  --color-warning: #8a5700;
+  --color-info: #245a81;
+  --radius-control: 4px;
+  --radius-card: 8px;
+  --shadow-card: 0 1px 2px rgba(23, 33, 43, 0.06);
+  --shadow-overlay: 0 4px 12px rgba(23, 33, 43, 0.1);
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 240ms;
+  font-family: 'Inter', Arial, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
+html {
+  min-width: 320px;
+  background: var(--color-background);
+}
+
 body {
+  min-height: 100vh;
   margin: 0;
   background: var(--color-background);
   color: var(--color-foreground);
-  font-family: system-ui, sans-serif;
+  font-family: 'Inter', Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+button,
+input,
+select,
+textarea {
+  color: inherit;
+  font: inherit;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  transition:
+    color var(--motion-fast) ease,
+    background-color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease;
+}
+
+a {
+  color: var(--color-accent);
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-ring);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: var(--color-secondary);
+  color: var(--color-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
