@@ -96,6 +96,43 @@ export const config = {
   get dailyParkingReleaseTime(): string {
     return validateDailyParkingReleaseTime(fromEnv('DAILY_PARKING_RELEASE_TIME'));
   },
+  // Outbound mail for the weekly utilization report. Unset outside production: the report is
+  // still generated and stored, and the mailer logs instead of contacting a server.
+  get smtp(): {
+    host?: string;
+    port: number;
+    secure: boolean;
+    user?: string;
+    password?: string;
+    from: string;
+  } {
+    const port = Number(fromEnv('SMTP_PORT') ?? 587);
+    return {
+      host: requiredInProduction('SMTP_HOST', fromEnv('SMTP_HOST')),
+      port: Number.isFinite(port) ? port : 587,
+      secure: (fromEnv('SMTP_SECURE') ?? '').toLowerCase() === 'true',
+      user: fromEnv('SMTP_USER'),
+      password: fromEnv('SMTP_PASSWORD'),
+      from: fromEnv('REPORT_FROM_ADDRESS') ?? 'parking-reports@folio3.com',
+    };
+  },
+  /** Stakeholders who receive the weekly utilization report (comma-separated). */
+  get reportRecipients(): string[] {
+    const listed = (fromEnv('REPORT_RECIPIENTS') ?? '')
+      .split(',')
+      .map((address) => address.trim())
+      .filter(Boolean);
+    if (!listed.length && isProduction()) throw new Error('REPORT_RECIPIENTS must be set in production');
+    return listed;
+  },
+  /** Office-local time the weekly report is generated and emailed each Monday. */
+  get weeklyReportTime(): string {
+    const value = fromEnv('WEEKLY_REPORT_TIME') ?? '07:00';
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) {
+      throw new Error('WEEKLY_REPORT_TIME must be a valid office-local time in HH:mm format');
+    }
+    return value;
+  },
 };
 
 // Shared by main.ts and the test setup, so tests exercise the same pipes and CORS as the app.
@@ -111,6 +148,9 @@ export function configureApp(app: INestApplication): void {
   void config.googleAllowedEmailDomain;
   void config.officeTimeZone;
   void config.dailyParkingReleaseTime;
+  void config.smtp;
+  void config.reportRecipients;
+  void config.weeklyReportTime;
   app.enableCors({ origin: corsOrigins(), credentials: true });
   // whitelist/forbidNonWhitelisted reject unknown fields; use the status the Spec requires (often 422).
   app.useGlobalPipes(

@@ -4,7 +4,19 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { ApiError, apiRequest } from '../../../../lib/api-client'
 import type { EmployeeIdentity, SessionRole } from '../../../../lib/session'
-import { ApplicationShell, FormField, ResultPanel, StatusBadge } from '../../../../components/operations'
+import { normalizeRoles } from '../../../../lib/roles'
+import { ApplicationShell, ResultPanel, StatusBadge } from '../../../../components/operations'
+import { ReleaseCalendar } from './release-calendar'
+import {
+  OFFICE_TIME_ZONE,
+  RELEASE_TIME,
+  claimabilityGuidance,
+  dateOnly,
+  displayClaimableAt,
+  displayDate,
+  getReleaseDateBounds,
+  statusLabel,
+} from './release-dates'
 import styles from './page.module.css'
 
 type Release = { id: string; releaseDate: string; claimableAt: string; status: string }
@@ -14,60 +26,6 @@ type EmployeeResponse = {
   corporateEmail?: string
   email?: string
   displayName?: string
-}
-
-const OFFICE_TIME_ZONE = process.env.NEXT_PUBLIC_OFFICE_TIME_ZONE || 'UTC'
-const RELEASE_TIME = process.env.NEXT_PUBLIC_DAILY_PARKING_RELEASE_TIME || '08:00'
-
-function officeDate(now: Date): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: OFFICE_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(now)
-  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]))
-  return `${values.year}-${values.month}-${values.day}`
-}
-
-export function getReleaseDateBounds(now: Date): { min: string; max: string } {
-  const min = officeDate(now)
-  const end = new Date(`${min}T00:00:00.000Z`)
-  end.setUTCDate(end.getUTCDate() + 30)
-  return { min, max: end.toISOString().slice(0, 10) }
-}
-
-function dateOnly(value: string): string {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : new Date(value).toISOString().slice(0, 10)
-}
-
-function displayDate(value: string): string {
-  const [year, month, day] = dateOnly(value).split('-').map(Number)
-  return new Intl.DateTimeFormat('en-US', { dateStyle: 'full', timeZone: 'UTC' })
-    .format(new Date(Date.UTC(year, month - 1, day)))
-}
-
-function displayClaimableAt(value: string): string {
-  return new Intl.DateTimeFormat('en-US', {
-    dateStyle: 'medium', timeStyle: 'short', timeZone: OFFICE_TIME_ZONE,
-  }).format(new Date(value))
-}
-
-export function claimabilityGuidance(
-  release: Pick<Release, 'releaseDate' | 'claimableAt'> & { status?: string },
-  now: Date,
-): string {
-  const releaseDay = dateOnly(release.releaseDate)
-  const claimableAt = new Date(release.claimableAt)
-  if (releaseDay > officeDate(now) || claimableAt.getTime() > now.getTime()) {
-    return `Not claimable yet. This release becomes claimable ${displayClaimableAt(release.claimableAt)} office time.`
-  }
-  if (release.status && release.status.toUpperCase() !== 'OPEN') {
-    return `This release is ${release.status.toLowerCase()} and is not available to claim.`
-  }
-  return `Claimable now. The configured release time has passed (${displayClaimableAt(release.claimableAt)} office time).`
-}
-
-function statusLabel(status: string): string {
-  if (status.toUpperCase() === 'OPEN') return 'Scheduled (OPEN)'
-  return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()
 }
 
 function responseFieldError(error: unknown): string | undefined {
@@ -89,10 +47,12 @@ export default function NewReleasePage() {
   const [identity, setIdentity] = useState<EmployeeIdentity | null>(null)
   const [role, setRole] = useState<SessionRole | null>(null)
   const [sessionError, setSessionError] = useState(false)
-  const [releaseDate, setReleaseDate] = useState('')
+  const [selectedDates, setSelectedDates] = useState<string[]>([])
   const [dateError, setDateError] = useState('')
   const [serviceError, setServiceError] = useState('')
   const [release, setRelease] = useState<Release | null>(null)
+  const [created, setCreated] = useState<Release[]>([])
+  const [existing, setExisting] = useState<Record<string, string>>({})
   const [creating, setCreating] = useState(false)
   const [clock, setClock] = useState(() => new Date())
   const bounds = useMemo(() => getReleaseDateBounds(clock), [clock])
@@ -102,32 +62,56 @@ export default function NewReleasePage() {
     apiRequest<EmployeeResponse>('/employees/me').then((response) => {
       const employee = (response.employee ?? response) as { corporateEmail?: string; email?: string; displayName?: string }
       const email = employee.corporateEmail ?? employee.email
-      const employeeRole = response.roles?.find((candidate) => candidate === 'employee' || candidate === 'security' || candidate === 'administrator')
+      const employeeRole = normalizeRoles(response.roles)[0]
       if (!active) return
       if (!email || !employeeRole) { setSessionError(true); return }
       setIdentity({ corporateEmail: email, ...(employee.displayName ? { displayName: employee.displayName } : {}) })
       setRole(employeeRole)
-      setReleaseDate(getReleaseDateBounds(new Date()).min)
     }).catch(() => { if (active) setSessionError(true) })
     return () => { active = false }
   }, [])
+
+  // Dates already released cannot be released again, so the calendar marks them unavailable
+  // rather than letting the employee submit a request the api will reject.
+  useEffect(() => {
+    let active = true
+    apiRequest<Release[]>('/parking/releases', { cache: 'no-store' }).then((releases) => {
+      if (!active) return
+      const taken: Record<string, string> = {}
+      for (const item of releases) {
+        if (item.status.toUpperCase() === 'CANCELLED') continue
+        taken[dateOnly(item.releaseDate)] = item.status.toUpperCase() === 'CLAIMED'
+          ? 'Already claimed by another employee'
+          : 'Already released'
+      }
+      setExisting(taken)
+    }).catch(() => { /* the calendar still works; the api remains the authority */ })
+    return () => { active = false }
+  }, [created])
 
   useEffect(() => {
     const interval = window.setInterval(() => setClock(new Date()), 30_000)
     return () => window.clearInterval(interval)
   }, [])
 
+  function toggleDate(date: string) {
+    setDateError('')
+    setSelectedDates((current) => current.includes(date)
+      ? current.filter((value) => value !== date)
+      : [...current, date].sort())
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (creating) return
     const current = getReleaseDateBounds(new Date())
-    if (!releaseDate) {
-      setDateError('Choose a release date to continue.')
+    if (!selectedDates.length) {
+      setDateError('Choose at least one date to release.')
       setServiceError('')
       return
     }
-    if (releaseDate < current.min || releaseDate > current.max) {
-      setDateError('Choose today or a date within the next 30 days.')
+    if (selectedDates.some((date) => date < current.min || date > current.max)) {
+      setDateError('Choose today or dates within the next 30 days.')
       setServiceError('')
       return
     }
@@ -135,15 +119,17 @@ export default function NewReleasePage() {
     setServiceError('')
     setCreating(true)
     try {
-      const created = await apiRequest<Release>('/parking/releases', {
-        method: 'POST', body: JSON.stringify({ releaseDate }),
+      const releases = await apiRequest<Release[]>('/parking/releases', {
+        method: 'POST', body: JSON.stringify({ releaseDates: selectedDates }),
       })
-      setRelease(created)
+      setCreated(releases)
+      setRelease(releases[0] ?? null)
+      setSelectedDates([])
       setClock(new Date())
     } catch (error) {
       const fieldError = responseFieldError(error)
       if (fieldError) setDateError(fieldError)
-      else setServiceError('We couldn’t create this release. Check your connection and try again.')
+      else setServiceError('We couldn\u2019t create these releases. Check your connection and try again.')
     } finally {
       setCreating(false)
     }
@@ -162,7 +148,7 @@ export default function NewReleasePage() {
 
   const guidance = release ? claimabilityGuidance(release, clock) : ''
   const isClaimable = guidance.startsWith('Claimable now.') && release?.status.toUpperCase() === 'OPEN'
-  const dateHint = `Choose today or a date up to 30 days ahead. Office time zone: ${OFFICE_TIME_ZONE}.`
+  const dateHint = `Choose today or any dates up to 30 days ahead. Office time zone: ${OFFICE_TIME_ZONE}.`
 
   return <ApplicationShell authState="authenticated" role={role} identity={identity}>
     <div className={styles.page}>
@@ -174,16 +160,40 @@ export default function NewReleasePage() {
           <p>Make your assigned space available to a colleague when you won’t need it.</p>
         </header>
         <section className={styles.formCard} aria-labelledby="release-form-heading">
-          <div className={styles.cardHeading}><span className={styles.step} aria-hidden="true">1</span><div><h2 id="release-form-heading">Choose a release date</h2><p>One simple step to schedule your space release.</p></div></div>
+          <div className={styles.cardHeading}><span className={styles.step} aria-hidden="true">1</span><div><h2 id="release-form-heading">Choose your release dates</h2><p>Select a single day or as many as you need.</p></div></div>
           <form onSubmit={submit} noValidate>
-            <FormField id="release-date" type="date" label="Release date" value={releaseDate} min={bounds.min} max={bounds.max} required disabled={creating} error={dateError} hint={dateHint} onChange={(event) => { setReleaseDate(event.target.value); setDateError('') }} />
+            <p className={styles.hint} id="calendar-hint">{dateHint}</p>
+            <ReleaseCalendar
+              min={bounds.min}
+              max={bounds.max}
+              selected={selectedDates}
+              unavailable={existing}
+              disabled={creating}
+              onToggle={toggleDate}
+            />
+            <p className={styles.selectionSummary} role="status">
+              {selectedDates.length
+                ? `${selectedDates.length} date${selectedDates.length === 1 ? '' : 's'} selected: ${selectedDates.map(displayDate).join(', ')}`
+                : 'No dates selected yet.'}
+            </p>
+            {dateError && <p className={styles.errorBanner} role="alert">{dateError}</p>}
             <aside className={styles.guidance} aria-label="Claimability guidance"><span className={styles.guidanceIcon} aria-hidden="true">i</span><p>Today’s release becomes claimable at <strong>{RELEASE_TIME}</strong> office time. If scheduled before then, or for a future date, it remains unavailable until that release time.</p></aside>
             {serviceError && <p className={styles.errorBanner} role="alert">{serviceError}</p>}
-            <div className={styles.actions}><Link className={styles.cancel} href="/parking/my-releases">Cancel</Link><button className={styles.submit} type="submit" disabled={creating}>{creating ? <><span className={styles.spinner} aria-hidden="true" />Creating your release…</> : 'Confirm release'}</button></div>
+            <div className={styles.actions}><Link className={styles.cancel} href="/parking/my-releases">Cancel</Link><button className={styles.submit} type="submit" disabled={creating || !selectedDates.length}>{creating ? <><span className={styles.spinner} aria-hidden="true" />Creating your releases…</> : `Confirm ${selectedDates.length || ''} release${selectedDates.length === 1 ? '' : 's'}`.replace('  ', ' ')}</button></div>
           </form>
         </section>
       </> : <section className={styles.resultColumn} aria-labelledby="result-heading">
-        <div className={styles.resultIntro}><p className={styles.eyebrow}>RELEASE CONFIRMATION</p><h1 id="result-heading">Your space release is scheduled.</h1><p>Your release was created. Review when it becomes claimable.</p></div>
+        <div className={styles.resultIntro}><p className={styles.eyebrow}>RELEASE CONFIRMATION</p><h1 id="result-heading">{created.length > 1 ? `${created.length} space releases are scheduled.` : 'Your space release is scheduled.'}</h1><p>Review when each date becomes claimable.</p></div>
+        {created.length > 1 && (
+          <ul className={styles.createdList} aria-label="Scheduled releases">
+            {created.map((item) => (
+              <li key={item.id}>
+                <strong>{displayDate(item.releaseDate)}</strong>
+                <span>Claimable from {displayClaimableAt(item.claimableAt)} office time</span>
+              </li>
+            ))}
+          </ul>
+        )}
         <ResultPanel variant="success" title="Release created successfully" date={displayDate(release.releaseDate)}>
           <p>Release date: <strong>{displayDate(release.releaseDate)}</strong></p>
           <p>Status: <StatusBadge status={release.status.toUpperCase() === 'OPEN' ? 'scheduled' : release.status.toLowerCase() as 'claimed' | 'cancelled'} label={statusLabel(release.status)} /></p>
@@ -191,7 +201,7 @@ export default function NewReleasePage() {
           <p className={isClaimable ? styles.availableNote : styles.notAvailableNote} role="status">{guidance}</p>
         </ResultPanel>
         <section className={styles.detailsCard} aria-labelledby="details-heading"><h2 id="details-heading">Release details</h2><p>The date and exact claimable time come from the parking service.</p><div className={styles.detailGrid}><div><span>Release date</span><strong>{displayDate(release.releaseDate)}</strong></div><div><span>Claimable from</span><strong>{displayClaimableAt(release.claimableAt)} office time</strong></div></div></section>
-        <div className={styles.resultActions}><Link href="/parking/my-releases">Back to my releases</Link><button className={styles.secondaryButton} type="button" onClick={() => { setRelease(null); setDateError(''); setServiceError('') }}>Create another release</button></div>
+        <div className={styles.resultActions}><Link href="/parking/my-releases">Back to my releases</Link><button className={styles.secondaryButton} type="button" onClick={() => { setRelease(null); setCreated([]); setDateError(''); setServiceError('') }}>Create another release</button></div>
       </section>}
     </div>
   </ApplicationShell>

@@ -1,0 +1,14 @@
+.calendar { display: flex; flex-wrap: wrap; gap: 1.5rem; }
+.month { min-width: 17rem; flex: 1 1 17rem; }
+.monthLabel { margin: 0 0 0.6rem; font-size: 0.95rem; color: #14304d; }
+.weekdays, .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.35rem; }
+.weekdays { margin-bottom: 0.35rem; font-size: 0.7rem; color: #64748b; text-align: center; letter-spacing: 0.04em; }
+.pad { display: block; }
+.day {
+  border: 1px solid #e2e8f0; background: #fff; border-radius: 0.5rem; padding: 0.55rem 0;
+  font-size: 0.9rem; cursor: pointer; color: #0f172a;
+}
+.day:hover:not(:disabled) { border-color: #14304d; }
+.selected { background: #14304d; border-color: #14304d; color: #fff; font-weight: 650; }
+.blocked { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; text-decoration: line-through; }
+.day:disabled:not(.blocked) { opacity: 0.5; cursor: not-allowed; }

@@ -1,13 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { ParkingReleaseStatus } from '@prisma/client';
+import { ParkingAuditEvent, ParkingReleaseStatus, VehicleVerificationOutcome } from '@prisma/client';
 import { config } from '../app.config';
+import { AuditService } from '../common/audit.service';
+import { officeDate, parseCalendarDate } from '../common/office-time';
 import { PrismaService } from '../prisma/prisma.service';
 
-export type VehicleVerificationOutcome =
-  | 'TEMPORARY_ALLOCATION_AUTHORIZED'
-  | 'NO_VALID_TEMPORARY_ALLOCATION'
-  | 'PERMANENT_STICKER_EXISTING_ENTRANCE_PROCESS'
-  | 'VEHICLE_NOT_REGISTERED';
+export type { VehicleVerificationOutcome };
 
 /** Explicit office-day decision returned to security for a vehicle verification. */
 export interface VehicleVerificationResult {
@@ -15,85 +13,138 @@ export interface VehicleVerificationResult {
   date: string;
   authorized: boolean | null;
   outcome: VehicleVerificationOutcome;
+  /** What the entrance indicator light must show: green only for a valid temporary allocation. */
+  indicator: 'GREEN' | 'OFF';
+  /** Whether this verification admitted the vehicle through the barrier. */
+  entryGranted: boolean;
+  recordId: string;
+}
+
+export interface VerificationSource {
+  /** SECURITY_DESK for a guard lookup, LPR_CAMERA for an automated plate read. */
+  source?: string;
+  actorEmployeeId?: string | null;
 }
 
 @Injectable()
 export class SecurityService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
-  async verifyVehicle(vehicleIdentifier: string): Promise<VehicleVerificationResult> {
+  async verifyVehicle(
+    vehicleIdentifier: string,
+    context: VerificationSource = {},
+  ): Promise<VehicleVerificationResult> {
     const configuration = await this.prisma.parkingConfiguration.findFirst({
       select: { officeTimeZone: true },
     });
-    const officeDate = this.getOfficeDate(new Date(), configuration?.officeTimeZone ?? config.officeTimeZone);
-    const date = officeDate.toISOString().slice(0, 10);
+    const date = officeDate(new Date(), configuration?.officeTimeZone ?? config.officeTimeZone);
+    const day = parseCalendarDate(date);
 
     const vehicle = await this.prisma.vehicle.findUnique({
       where: { vehicleIdentifier },
-      select: { employeeId: true, hasPermanentSticker: true },
+      select: { id: true, employeeId: true, hasPermanentSticker: true },
     });
 
+    const decision = await this.decide(vehicle, day);
+
+    // Every attempt is recorded -- authorized or not -- because the Spec requires a complete
+    // entrance audit trail and the utilization report infers usage from the absence of a record.
+    const record = await this.prisma.vehicleEntryRecord.create({
+      data: {
+        vehicleIdentifier,
+        vehicleId: vehicle?.id ?? null,
+        employeeId: vehicle?.employeeId ?? null,
+        officeDate: day,
+        outcome: decision.outcome,
+        authorized: decision.authorized,
+        entryGranted: decision.entryGranted,
+        source: context.source ?? 'SECURITY_DESK',
+      },
+      select: { id: true },
+    });
+
+    await this.audit.record({
+      event: ParkingAuditEvent.VEHICLE_VERIFIED,
+      entityType: 'VehicleEntryRecord',
+      entityId: record.id,
+      actorEmployeeId: context.actorEmployeeId ?? null,
+      detail: {
+        vehicleIdentifier,
+        outcome: decision.outcome,
+        entryGranted: decision.entryGranted,
+        source: context.source ?? 'SECURITY_DESK',
+      },
+    });
+
+    return {
+      vehicleIdentifier,
+      date,
+      authorized: decision.authorized,
+      outcome: decision.outcome,
+      indicator: decision.entryGranted && decision.authorized === true ? 'GREEN' : 'OFF',
+      entryGranted: decision.entryGranted,
+      recordId: record.id,
+    };
+  }
+
+  private async decide(
+    vehicle: { employeeId: string; hasPermanentSticker: boolean } | null,
+    day: Date,
+  ): Promise<{ outcome: VehicleVerificationOutcome; authorized: boolean | null; entryGranted: boolean }> {
     if (!vehicle) {
       return {
-        vehicleIdentifier,
-        date,
+        outcome: VehicleVerificationOutcome.VEHICLE_NOT_REGISTERED,
         authorized: false,
-        outcome: 'VEHICLE_NOT_REGISTERED',
+        entryGranted: false,
       };
     }
 
     if (vehicle.hasPermanentSticker) {
       return {
-        vehicleIdentifier,
-        date,
-        // Permanent sticker entry is decided by the existing entrance process, not this API.
+        // Permanent sticker entry is decided by the existing entrance process, not this API, so the
+        // vehicle is admitted and recorded as present without a system authorization decision.
+        outcome: VehicleVerificationOutcome.PERMANENT_STICKER_EXISTING_ENTRANCE_PROCESS,
         authorized: null,
-        outcome: 'PERMANENT_STICKER_EXISTING_ENTRANCE_PROCESS',
+        entryGranted: true,
       };
     }
 
     const allocation = await this.prisma.parkingAllocation.findFirst({
       where: {
         employeeId: vehicle.employeeId,
-        parkingRelease: {
-          is: {
-            releaseDate: officeDate,
-            status: ParkingReleaseStatus.CLAIMED,
-          },
-        },
+        parkingRelease: { is: { releaseDate: day, status: ParkingReleaseStatus.CLAIMED } },
       },
       select: { id: true },
     });
 
-    if (allocation) {
-      return {
-        vehicleIdentifier,
-        date,
-        authorized: true,
-        outcome: 'TEMPORARY_ALLOCATION_AUTHORIZED',
-      };
-    }
-
-    return {
-      vehicleIdentifier,
-      date,
-      authorized: false,
-      outcome: 'NO_VALID_TEMPORARY_ALLOCATION',
-    };
+    return allocation
+      ? {
+          outcome: VehicleVerificationOutcome.TEMPORARY_ALLOCATION_AUTHORIZED,
+          authorized: true,
+          entryGranted: true,
+        }
+      : {
+          outcome: VehicleVerificationOutcome.NO_VALID_TEMPORARY_ALLOCATION,
+          authorized: false,
+          entryGranted: false,
+        };
   }
 
-  private getOfficeDate(instant: Date, timeZone: string): Date {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(instant);
-    const partValue = (type: 'year' | 'month' | 'day'): number => {
-      const value = parts.find((part) => part.type === type)?.value;
-      if (!value) throw new Error(`Could not determine office-local ${type}`);
-      return Number(value);
-    };
-    return new Date(Date.UTC(partValue('year'), partValue('month') - 1, partValue('day')));
+  /** Entrance activity for a day, newest first -- the audit view the Spec requires. */
+  async listEntryRecords(date?: string) {
+    const configuration = await this.prisma.parkingConfiguration.findFirst({
+      select: { officeTimeZone: true },
+    });
+    const day = parseCalendarDate(
+      date ?? officeDate(new Date(), configuration?.officeTimeZone ?? config.officeTimeZone),
+    );
+    return this.prisma.vehicleEntryRecord.findMany({
+      where: { officeDate: day },
+      orderBy: { detectedAt: 'desc' },
+      include: { employee: { select: { id: true, displayName: true, corporateEmail: true } } },
+    });
   }
 }

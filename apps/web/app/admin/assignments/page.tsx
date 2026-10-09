@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { AccessDenied, ApplicationShell, StatusBadge } from '../../../components/operations'
 import { ApiError, apiRequest } from '../../../lib/api-client'
-import type { EmployeeSession, SessionRole } from '../../../lib/session'
+import type { EmployeeIdentity, EmployeeSession, SessionRole } from '../../../lib/session'
+import { normalizeRoles } from '../../../lib/roles'
 import styles from './page.module.css'
 
 type Assignment = {
@@ -250,8 +251,9 @@ export default function AssignmentsPage() {
   const [checking, setChecking] = useState(true)
 
   useEffect(() => {
-    apiRequest<EmployeeSession | { employee: EmployeeSession['employee']; roles?: SessionRole[] }>('/employees/me')
-      .then((result) => setSession({ employee: result.employee, roles: result.roles ?? [] }))
+    apiRequest<Partial<EmployeeSession> & Partial<EmployeeIdentity> & { roles?: unknown }>('/employees/me')
+      // /employees/me returns the profile unwrapped; older callers sent a { employee, roles } envelope.
+      .then((result) => setSession({ employee: result.employee ?? (result as EmployeeIdentity), roles: normalizeRoles(result.roles) }))
       .catch((error: unknown) => setAuthError(error instanceof ApiError && error.status === 401 ? 'Your session has expired. Sign in again to continue.' : 'We could not verify your administrator access.'))
       .finally(() => setChecking(false))
   }, [])

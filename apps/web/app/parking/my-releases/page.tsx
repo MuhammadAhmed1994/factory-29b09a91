@@ -209,7 +209,7 @@ export default function MyReleasesPage() {
                         {change.status === 'CANCELLED' && <span className={styles.activityDetail}>Cancelled by you</span>}
                       </div>)}</div></td>
                       <td className={styles.actionCell} data-label="Available action">{release.status === 'OPEN' ? <button ref={cancelButtonRef} className={styles.cancelButton} type="button" aria-label={`Cancel release for ${formatDate(release.releaseDate)}`} onClick={() => { setPendingCancel(release); setCancelError('') }}>Cancel release</button>
-                        : claimed ? <span className={styles.unavailable}><strong>Cancellation unavailable</strong>Space has been claimed</span> : <span className={styles.unavailable}><strong>Release closed</strong>No further action</span>}</td>
+                        : claimed ? <span className={styles.unavailable}><strong>Cancellation unavailable</strong>Claimed &mdash; only a parking administrator can revert this</span> : <span className={styles.unavailable}><strong>Release closed</strong>No further action</span>}</td>
                     </tr>
                   })}</tbody>
                 </table>
