@@ -1,0 +1,31 @@
+.page { display: flex; flex-direction: column; gap: 1.5rem; padding: 2rem 1.5rem; max-width: 60rem; margin: 0 auto; width: 100%; }
+.heading h1 { margin: 0.25rem 0 0.25rem; font-size: 2rem; letter-spacing: -0.02em; }
+.breadcrumb { font-size: 0.8rem; color: #64748b; }
+.subtitle { margin: 0; color: #475569; }
+.card { border: 1px solid #e2e8f0; border-radius: 0.9rem; background: #fff; padding: 1.25rem 1.5rem; }
+.statusCard { display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: center; justify-content: space-between; }
+.statusLabel { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; }
+.statusValue { font-size: 1.35rem; font-weight: 650; margin-top: 0.15rem; }
+.spaceMeta { color: #475569; font-size: 0.9rem; margin-top: 0.2rem; }
+.releaseButton { border: 0; border-radius: 0.6rem; background: #14304d; color: #fff; font-weight: 650; padding: 0.95rem 1.5rem; font-size: 1rem; cursor: pointer; }
+.releaseButton:disabled { opacity: 0.55; cursor: not-allowed; }
+.secondary { border: 1px solid #cbd5f5; border-radius: 0.6rem; background: #fff; color: #14304d; font-weight: 600; padding: 0.7rem 1.1rem; cursor: pointer; text-decoration: none; display: inline-block; }
+.pill { border-radius: 999px; padding: 0.25rem 0.7rem; font-size: 0.78rem; font-weight: 650; }
+.reserved { background: #eef2ff; color: #3730a3; }
+.released { background: #fef9c3; color: #854d0e; }
+.claimed { background: #dcfce7; color: #166534; }
+.none { background: #f1f5f9; color: #475569; }
+.availability { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.count { font-size: 2.2rem; font-weight: 700; color: #14304d; line-height: 1; }
+.error { border: 1px solid #fecaca; background: #fef2f2; color: #b91c1c; border-radius: 0.6rem; padding: 0.75rem 1rem; }
+.success { border: 1px solid #bbf7d0; background: #f0fdf4; color: #166534; border-radius: 0.6rem; padding: 0.75rem 1rem; }
+.notice { color: #475569; font-size: 0.85rem; }
+.actions { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
+.overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); display: grid; place-items: center; padding: 1rem; }
+.dialog { background: #fff; border-radius: 0.9rem; padding: 1.5rem; max-width: 26rem; width: 100%; display: flex; flex-direction: column; gap: 0.85rem; }
+.dialog h2 { margin: 0; font-size: 1.2rem; }
+.dialogActions { display: flex; gap: 0.75rem; justify-content: flex-end; }
+.authState { padding: 3rem; text-align: center; color: #475569; }
+
+.notification { display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; border-color: #bfdbfe; background: #eff6ff; }
+.prompt { display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; border-color: #fde68a; background: #fffbeb; }

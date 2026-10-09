@@ -11,6 +11,11 @@ describe('employee self-service profile and vehicles', () => {
       department: 'Engineering',
       employeeNumber: 'E-100',
     };
+    // The api stores roles as rows; the profile endpoint flattens them because the web resolves
+    // which workspace an employee may open from this response.
+    const roleRows = [{ role: 'EMPLOYEE' }, { role: 'PARKING_ADMINISTRATOR' }];
+    const profileRow = { ...profile, roles: roleRows };
+    const profileWithRoles = { ...profile, roles: ['EMPLOYEE', 'PARKING_ADMINISTRATOR'] };
     const vehicle = {
       id: 'vehicle-1',
       vehicleIdentifier: 'ABC-123',
@@ -20,8 +25,8 @@ describe('employee self-service profile and vehicles', () => {
     };
     const prisma = {
       employee: {
-        findUnique: jest.fn().mockResolvedValue(profile),
-        update: jest.fn().mockResolvedValue({ ...profile, displayName: 'Updated Employee' }),
+        findUnique: jest.fn().mockResolvedValue(profileRow),
+        update: jest.fn().mockResolvedValue({ ...profileRow, displayName: 'Updated Employee' }),
       },
       vehicle: {
         findMany: jest.fn().mockResolvedValue([vehicle]),
@@ -33,11 +38,12 @@ describe('employee self-service profile and vehicles', () => {
     } as unknown as PrismaService;
     const service = new EmployeesService(prisma);
 
-    expect(await service.getProfile('employee-1')).toEqual(profile);
+    expect(await service.getProfile('employee-1')).toEqual(profileWithRoles);
     expect(await service.updateProfile('employee-1', { displayName: 'Updated Employee' })).toMatchObject({
       corporateEmail: 'employee@folio3.com',
       employeeNumber: 'E-100',
       displayName: 'Updated Employee',
+      roles: ['EMPLOYEE', 'PARKING_ADMINISTRATOR'],
     });
     expect(prisma.employee.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'employee-1' },

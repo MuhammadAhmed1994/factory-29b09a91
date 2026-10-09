@@ -1,7 +1,9 @@
 import { headers } from 'next/headers'
+import { normalizeRoles } from './roles'
 
-export const SESSION_ROLES = ['employee', 'security', 'administrator'] as const
-export type SessionRole = (typeof SESSION_ROLES)[number]
+export { SESSION_ROLES, normalizeRole, normalizeRoles } from './roles'
+export type { SessionRole } from './roles'
+import type { SessionRole } from './roles'
 
 export interface EmployeeIdentity {
   id?: string
@@ -20,22 +22,6 @@ export type SessionLookup =
   | { status: 'expired' }
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001').replace(/\/$/, '')
-
-function normalizeRole(value: unknown): SessionRole | null {
-  if (typeof value !== 'string') return null
-  switch (value.toLowerCase()) {
-    case 'employee':
-      return 'employee'
-    case 'security':
-    case 'security_guard':
-      return 'security'
-    case 'admin':
-    case 'administrator':
-      return 'administrator'
-    default:
-      return null
-  }
-}
 
 function parseSession(payload: unknown): EmployeeSession | null {
   if (typeof payload !== 'object' || payload === null) return null
@@ -56,7 +42,7 @@ function parseSession(payload: unknown): EmployeeSession | null {
     : Array.isArray(candidate.roles)
       ? candidate.roles
       : []
-  const roles = [...new Set(sourceRoles.map(normalizeRole).filter((role): role is SessionRole => role !== null))]
+  const roles = normalizeRoles(sourceRoles)
   const id = typeof candidate.id === 'string' ? candidate.id : undefined
   const displayName = typeof candidate.displayName === 'string' ? candidate.displayName : undefined
 
@@ -91,5 +77,5 @@ export function hasAnyRole(session: EmployeeSession, allowedRoles: readonly Sess
 export function workspaceForSession(session: EmployeeSession): string {
   if (session.roles.includes('administrator')) return '/admin'
   if (session.roles.includes('security')) return '/security/verify'
-  return '/parking/available'
+  return '/parking'
 }

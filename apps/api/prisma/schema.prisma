@@ -19,21 +19,54 @@ enum ParkingRole {
   PARKING_ADMINISTRATOR
 }
 
+/// Decision recorded for every vehicle presented at the entrance.
+enum VehicleVerificationOutcome {
+  TEMPORARY_ALLOCATION_AUTHORIZED
+  NO_VALID_TEMPORARY_ALLOCATION
+  PERMANENT_STICKER_EXISTING_ENTRANCE_PROCESS
+  VEHICLE_NOT_REGISTERED
+}
+
+/// Why a parking allocation was or was not used on its date.
+enum ParkingUtilizationOutcome {
+  DEDICATED_UTILIZED
+  DEDICATED_UNUSED
+  TEMPORARY_UTILIZED
+  TEMPORARY_UNUSED
+}
+
+/// Append-only record of the events the Spec requires an audit trail for.
+enum ParkingAuditEvent {
+  RELEASE_SCHEDULED
+  RELEASE_CANCELLED
+  RELEASE_CLAIMED
+  RELEASE_REVERTED_BY_ADMINISTRATOR
+  VEHICLE_VERIFIED
+}
+
+enum ParkingNotificationType {
+  PARKING_AVAILABLE
+}
+
 model Employee {
-  id             String             @id @default(cuid())
-  corporateEmail String             @unique
-  googleSubject  String             @unique
-  displayName    String
-  department     String?
-  employeeNumber String?            @unique
-  isActive       Boolean            @default(true)
-  createdAt      DateTime           @default(now()) @db.Timestamptz(3)
-  updatedAt      DateTime           @updatedAt @db.Timestamptz(3)
-  assignments    ParkingAssignment[]
-  allocations    ParkingAllocation[]
-  vehicles       Vehicle[]
-  roles          EmployeeRole[]     @relation("EmployeeRoles")
-  grantedRoles   EmployeeRole[]     @relation("RoleGrantedBy")
+  id                String                    @id @default(cuid())
+  corporateEmail    String                    @unique
+  googleSubject     String                    @unique
+  displayName       String
+  department        String?
+  employeeNumber    String?                   @unique
+  isActive          Boolean                   @default(true)
+  createdAt         DateTime                  @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime                  @updatedAt @db.Timestamptz(3)
+  assignments       ParkingAssignment[]
+  allocations       ParkingAllocation[]
+  vehicles          Vehicle[]
+  roles             EmployeeRole[]            @relation("EmployeeRoles")
+  grantedRoles      EmployeeRole[]            @relation("RoleGrantedBy")
+  entryRecords      VehicleEntryRecord[]
+  utilizationEvents ParkingUtilizationEvent[]
+  auditEvents       ParkingAuditLog[]         @relation("AuditActor")
+  notifications     ParkingNotification[]
 }
 
 model ParkingFloor {
@@ -46,27 +79,27 @@ model ParkingFloor {
 }
 
 model ParkingSpace {
-  id            String              @id @default(cuid())
+  id             String              @id @default(cuid())
   parkingFloorId String
-  spaceCode     String              @unique
-  createdAt     DateTime            @default(now()) @db.Timestamptz(3)
-  updatedAt     DateTime            @updatedAt @db.Timestamptz(3)
-  parkingFloor  ParkingFloor        @relation(fields: [parkingFloorId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  assignments   ParkingAssignment[]
+  spaceCode      String              @unique
+  createdAt      DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime            @updatedAt @db.Timestamptz(3)
+  parkingFloor   ParkingFloor        @relation(fields: [parkingFloorId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  assignments    ParkingAssignment[]
 
   @@index([parkingFloorId])
 }
 
 model ParkingAssignment {
-  id             String          @id @default(cuid())
+  id             String           @id @default(cuid())
   employeeId     String
   parkingSpaceId String
-  effectiveFrom  DateTime        @db.Date
-  effectiveTo    DateTime?       @db.Date
-  createdAt      DateTime        @default(now()) @db.Timestamptz(3)
-  updatedAt      DateTime        @updatedAt @db.Timestamptz(3)
-  employee       Employee        @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  parkingSpace   ParkingSpace    @relation(fields: [parkingSpaceId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  effectiveFrom  DateTime         @db.Date
+  effectiveTo    DateTime?        @db.Date
+  createdAt      DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime         @updatedAt @db.Timestamptz(3)
+  employee       Employee         @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  parkingSpace   ParkingSpace     @relation(fields: [parkingSpaceId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   releases       ParkingRelease[]
 
   @@index([employeeId])
@@ -77,65 +110,151 @@ model ParkingRelease {
   id                  String               @id @default(cuid())
   parkingAssignmentId String
   releaseDate         DateTime             @db.Date
-  claimableAt          DateTime             @db.Timestamptz(3)
-  status               ParkingReleaseStatus @default(OPEN)
-  cancelledAt          DateTime?            @db.Timestamptz(3)
-  createdAt            DateTime             @default(now()) @db.Timestamptz(3)
-  updatedAt            DateTime             @updatedAt @db.Timestamptz(3)
-  parkingAssignment    ParkingAssignment    @relation(fields: [parkingAssignmentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  allocation           ParkingAllocation?
+  claimableAt         DateTime             @db.Timestamptz(3)
+  status              ParkingReleaseStatus @default(OPEN)
+  cancelledAt         DateTime?            @db.Timestamptz(3)
+  createdAt           DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime             @updatedAt @db.Timestamptz(3)
+  parkingAssignment   ParkingAssignment    @relation(fields: [parkingAssignmentId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  allocation          ParkingAllocation?
 
   @@index([parkingAssignmentId])
   @@index([releaseDate, status, claimableAt])
 }
 
 model ParkingAllocation {
-  id              String         @id @default(cuid())
+  id               String         @id @default(cuid())
   parkingReleaseId String         @unique
-  employeeId      String
-  allocatedAt     DateTime       @db.Timestamptz(3)
-  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
-  updatedAt       DateTime       @updatedAt @db.Timestamptz(3)
-  parkingRelease  ParkingRelease @relation(fields: [parkingReleaseId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  employee        Employee       @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  employeeId       String
+  allocatedAt      DateTime       @db.Timestamptz(3)
+  createdAt        DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime       @updatedAt @db.Timestamptz(3)
+  parkingRelease   ParkingRelease @relation(fields: [parkingReleaseId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  employee         Employee       @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 
   @@index([employeeId])
 }
 
 model Vehicle {
-  id                 String   @id @default(cuid())
-  employeeId         String
-  vehicleIdentifier  String   @unique
-  make               String?
-  model              String?
+  id                  String                    @id @default(cuid())
+  employeeId          String
+  vehicleIdentifier   String                    @unique
+  make                String?
+  model               String?
+  color               String?
   hasPermanentSticker Boolean
-  createdAt          DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt          DateTime @updatedAt @db.Timestamptz(3)
-  employee           Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdAt           DateTime                  @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime                  @updatedAt @db.Timestamptz(3)
+  employee            Employee                  @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  entryRecords        VehicleEntryRecord[]
+  utilizationEvents   ParkingUtilizationEvent[]
 
   @@index([employeeId])
 }
 
 model EmployeeRole {
-  id                   String     @id @default(cuid())
+  id                   String      @id @default(cuid())
   employeeId           String
   role                 ParkingRole
   assignedByEmployeeId String?
-  createdAt            DateTime   @default(now()) @db.Timestamptz(3)
-  updatedAt            DateTime   @updatedAt @db.Timestamptz(3)
-  employee             Employee   @relation("EmployeeRoles", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  assignedBy           Employee?  @relation("RoleGrantedBy", fields: [assignedByEmployeeId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  createdAt            DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime    @updatedAt @db.Timestamptz(3)
+  employee             Employee    @relation("EmployeeRoles", fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  assignedBy           Employee?   @relation("RoleGrantedBy", fields: [assignedByEmployeeId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   @@unique([employeeId, role])
   @@index([assignedByEmployeeId])
 }
 
 model ParkingConfiguration {
-  id                     String   @id @default(cuid())
+  id                      String   @id @default(cuid())
   /// Office-local time of day in HH:mm format; defaults to 08:00.
   dailyParkingReleaseTime String   @default("08:00") @db.VarChar(5)
   /// IANA time-zone identifier used to interpret office-local calendar dates.
   officeTimeZone          String   @db.VarChar(255)
   createdAt               DateTime @default(now()) @db.Timestamptz(3)
   updatedAt               DateTime @updatedAt @db.Timestamptz(3)
+}
+
+/// Every verification attempt at the entrance, successful or not (US-005). Also the evidence the
+/// utilization report uses to decide whether an allocated space was actually used (US-006).
+model VehicleEntryRecord {
+  id                String                     @id @default(cuid())
+  vehicleIdentifier String
+  vehicleId         String?
+  employeeId        String?
+  officeDate        DateTime                   @db.Date
+  outcome           VehicleVerificationOutcome
+  authorized        Boolean?
+  entryGranted      Boolean
+  source            String                     @default("SECURITY_DESK")
+  detectedAt        DateTime                   @default(now()) @db.Timestamptz(3)
+  vehicle           Vehicle?                   @relation(fields: [vehicleId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  employee          Employee?                  @relation(fields: [employeeId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([officeDate])
+  @@index([vehicleIdentifier, officeDate])
+  @@index([employeeId, officeDate])
+  @@index([vehicleId])
+}
+
+/// One row per employee per day describing whether their parking was used (US-006).
+model ParkingUtilizationEvent {
+  id         String                    @id @default(cuid())
+  employeeId String
+  vehicleId  String?
+  officeDate DateTime                  @db.Date
+  outcome    ParkingUtilizationOutcome
+  spaceCode  String?
+  createdAt  DateTime                  @default(now()) @db.Timestamptz(3)
+  employee   Employee                  @relation(fields: [employeeId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  vehicle    Vehicle?                  @relation(fields: [vehicleId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@unique([employeeId, officeDate, outcome])
+  @@index([officeDate])
+}
+
+/// Append-only audit trail; rows are never updated or deleted.
+model ParkingAuditLog {
+  id              String            @id @default(cuid())
+  event           ParkingAuditEvent
+  entityType      String
+  entityId        String
+  actorEmployeeId String?
+  detail          Json?
+  occurredAt      DateTime          @default(now()) @db.Timestamptz(3)
+  actor           Employee?         @relation("AuditActor", fields: [actorEmployeeId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([entityType, entityId])
+  @@index([occurredAt])
+}
+
+/// Queued notification telling eligible employees that parking became available (US-004).
+model ParkingNotification {
+  id         String                  @id @default(cuid())
+  employeeId String
+  type       ParkingNotificationType
+  title      String
+  body       String
+  officeDate DateTime                @db.Date
+  readAt     DateTime?               @db.Timestamptz(3)
+  createdAt  DateTime                @default(now()) @db.Timestamptz(3)
+  employee   Employee                @relation(fields: [employeeId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([employeeId, readAt])
+  @@index([officeDate])
+}
+
+/// Generated weekly utilization report (US-006), retained with its delivery result.
+model WeeklyUtilizationReport {
+  id            String    @id @default(cuid())
+  weekStart     DateTime  @db.Date
+  weekEnd       DateTime  @db.Date
+  statistics    Json
+  generatedAt   DateTime  @default(now()) @db.Timestamptz(3)
+  recipients    String[]
+  emailedAt     DateTime? @db.Timestamptz(3)
+  deliveryError String?
+
+  @@unique([weekStart])
 }

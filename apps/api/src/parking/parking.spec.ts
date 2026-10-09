@@ -1,5 +1,7 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { ParkingReleaseStatus } from '@prisma/client';
+import { AuditService } from '../common/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ParkingService } from './parking.service';
 
@@ -38,7 +40,11 @@ function serviceWith(prismaOverrides: Record<string, unknown>): ParkingService {
     },
     ...prismaOverrides,
   } as unknown as PrismaService;
-  return new ParkingService(prisma);
+  const audit = { record: jest.fn().mockResolvedValue(undefined) } as unknown as AuditService;
+  const notifications = {
+    notifyParkingAvailable: jest.fn().mockResolvedValue(0),
+  } as unknown as NotificationsService;
+  return new ParkingService(prisma, audit, notifications);
 }
 
 describe('Parking release workflows', () => {
@@ -51,7 +57,10 @@ describe('Parking release workflows', () => {
       parkingAssignment: {
         findFirst: jest.fn().mockResolvedValue({ id: 'assignment-1', releases: [] }),
       },
-      parkingRelease: { create: jest.fn().mockResolvedValue(stored) },
+      parkingRelease: {
+        create: jest.fn().mockResolvedValue(stored),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     };
     const service = serviceWith(prisma);
     const result = await service.createRelease('holder-1', '2026-06-10');
@@ -67,7 +76,8 @@ describe('Parking release workflows', () => {
     }));
     const service = serviceWith({
       parkingAssignment: { findFirst: jest.fn().mockResolvedValue({ id: 'assignment-1', releases: [] }) },
-      parkingRelease: { create },
+      // A post-cutoff release is immediately claimable, so creating one reads availability.
+      parkingRelease: { create, findMany: jest.fn().mockResolvedValue([]) },
     });
     const early = await service.createRelease('holder-1', '2026-06-10');
     const future = await service.createRelease('holder-1', '2026-06-11');
@@ -118,6 +128,7 @@ describe('Parking release workflows', () => {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue(allocation),
       },
+      parkingAssignment: { findFirst: jest.fn().mockResolvedValue(null) },
     };
     const service = serviceWith({
       parkingRelease: { findMany: jest.fn().mockResolvedValue([release]) },
@@ -150,6 +161,7 @@ describe('Parking release workflows', () => {
           return { count: 1 };
         }),
       },
+      parkingAssignment: { findFirst: jest.fn().mockResolvedValue(null) },
       parkingAllocation: {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockImplementation(async ({ data }: any) => {
@@ -174,5 +186,31 @@ describe('Parking release workflows', () => {
     expect(outcomes.filter((outcome) => outcome.status === 'rejected' && outcome.reason instanceof ConflictException)).toHaveLength(1);
     expect(createdAllocations).toBe(1);
     expect(currentStatus).toBe(ParkingReleaseStatus.CLAIMED);
+  });
+  it('[AC-4] refuses a claim from an employee who already holds a dedicated space for that date', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-10T16:00:00.000Z'));
+    const release = releaseFixture({ claimableAt: new Date('2026-06-10T15:00:00.000Z') });
+    const findAssignment = jest.fn().mockResolvedValue({ id: 'assignment-9' });
+    const create = jest.fn();
+    const tx = {
+      parkingRelease: {
+        findUnique: jest.fn().mockResolvedValue(release),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      parkingAssignment: { findFirst: findAssignment },
+      parkingAllocation: { findFirst: jest.fn().mockResolvedValue(null), create },
+    };
+    const service = serviceWith({
+      $transaction: jest.fn((callback: (value: unknown) => unknown) => callback(tx)),
+    });
+
+    await expect(service.claimRelease('dedicated-holder', 'release-1'))
+      .rejects.toBeInstanceOf(ForbiddenException);
+    // The release must stay claimable for an employee who actually has no dedicated space.
+    expect(create).not.toHaveBeenCalled();
+    expect(tx.parkingRelease.updateMany).not.toHaveBeenCalled();
+    expect(findAssignment).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ employeeId: 'dedicated-holder' }),
+    }));
   });
 });

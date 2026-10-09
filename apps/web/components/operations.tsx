@@ -21,14 +21,18 @@ const roleNames: Record<SessionRole, string> = {
 }
 
 const navigation: { label: string; href: string; roles: SessionRole[] }[] = [
+  { label: 'Home', href: '/parking', roles: ['employee'] },
   { label: 'Available parking', href: '/parking/available', roles: ['employee'] },
   { label: 'My releases', href: '/parking/my-releases', roles: ['employee'] },
+  { label: 'My vehicles', href: '/parking/vehicles', roles: ['employee'] },
   { label: 'Verify vehicle', href: '/security/verify', roles: ['security'] },
   { label: 'Overview', href: '/admin', roles: ['administrator'] },
   { label: 'Assignments', href: '/admin/assignments', roles: ['administrator'] },
   { label: 'Employees', href: '/admin/employees', roles: ['administrator'] },
   { label: 'Configuration', href: '/admin/configuration', roles: ['administrator'] },
   { label: 'Reports', href: '/admin/reports', roles: ['administrator'] },
+  { label: 'Utilization', href: '/admin/utilization', roles: ['administrator'] },
+  { label: 'Entrance log', href: '/security/entry-log', roles: ['security'] },
 ]
 
 /** Reusable workspace chrome; protected APIs and routes must still enforce authorization server-side. */
@@ -41,7 +45,7 @@ export function ApplicationShell({ role, identity, authState, children }: Applic
   return (
     <div className={styles.shell}>
       <header className={styles.topbar}>
-        <Link className={styles.brand} href={authenticated && role === 'administrator' ? '/admin' : '/parking/available'}>
+        <Link className={styles.brand} href={authenticated && role === 'administrator' ? '/admin' : '/parking'}>
           <span aria-hidden="true" className={styles.brandMark}>P</span>
           <span>Parking operations</span>
         </Link>

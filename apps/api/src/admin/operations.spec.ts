@@ -28,7 +28,7 @@ describe('administrator operations', () => {
       parkingAllocation: { findMany: jest.fn().mockResolvedValue([]) },
     } as unknown as PrismaService;
     const service = new OperationsService(prisma);
-    const controller = new OperationsController(service);
+    const controller = new OperationsController(service, { revertClaimedRelease: jest.fn() } as never);
 
     await expect(controller.getConfiguration()).resolves.toMatchObject({
       dailyParkingReleaseTime: '08:00',
